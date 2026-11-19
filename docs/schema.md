@@ -18,6 +18,8 @@ with your own migration tool. Use one or the other: `migrate` records what it ap
 - The secret is stored as Standard Webhooks writes it, `whsec_` and base64 of 32 random
   bytes. The relay signs with it, so it cannot be a hash. Keep the table out of reach of
   anyone who should not be able to sign as you.
+- `webhook_endpoints.failing_since` is set by the relay on the first failed attempt
+  after a success and cleared by the next success. `endpoints enable` clears it too.
 - `webhook_messages.payload` is the exact body that is signed and sent. The application
   serializes it once; the relay does not parse or rewrite it.
 

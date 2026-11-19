@@ -17,3 +17,7 @@ schema or the configuration; such changes are marked **BREAKING**.
   signs requests per Standard Webhooks, retries on a schedule (8 attempts over about 28
   hours by default) and records every attempt. Several relays can share a database.
   See [docs/relay.md](docs/relay.md).
+- The relay disables an endpoint that answers 410 Gone, or whose attempts have all
+  failed for `RELAY_DISABLE_AFTER` (5 days by default).
+- The relay refuses to connect to loopback, private, link-local and other non-public
+  addresses, checked after DNS. `RELAY_ALLOW_PRIVATE_NETWORKS=true` turns this off.
