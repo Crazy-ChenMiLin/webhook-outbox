@@ -1,0 +1,36 @@
+{
+    "name": "ianfoxdev/webhook-outbox",
+    "description": "Webhooks queued in your database transaction and delivered by a separate relay, signed per Standard Webhooks.",
+    "type": "library",
+    "license": "MIT",
+    "keywords": [
+        "webhooks",
+        "standard-webhooks",
+        "outbox",
+        "transactional-outbox",
+        "postgresql"
+    ],
+    "homepage": "https://github.com/IanFoxDev/webhook-outbox",
+    "authors": [
+        {
+            "name": "Anatoly Pankratyev",
+            "email": "ianfoxdeveloper@gmail.com"
+        }
+    ],
+    "support": {
+        "issues": "https://github.com/IanFoxDev/webhook-outbox/issues",
+        "source": "https://github.com/IanFoxDev/webhook-outbox"
+    },
+    "require": {
+        "php": "^8.3",
+        "ext-json": "*"
+    },
+    "autoload": {
+        "psr-4": {
+            "IanFoxDev\\WebhookOutbox\\": "src/"
+        }
+    },
+    "config": {
+        "sort-packages": true
+    }
+}
