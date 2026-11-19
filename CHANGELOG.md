@@ -13,3 +13,7 @@ schema or the configuration; such changes are marked **BREAKING**.
   `webhook_attempts` for PostgreSQL 14 or later, as `schema/postgresql.sql` and as
   `webhook-outbox-relay migrate`. See [docs/schema.md](docs/schema.md).
 - `webhook-outbox-relay endpoints add|list|secret|disable|enable`.
+- `webhook-outbox-relay run`: dispatches messages to endpoints by customer and type,
+  signs requests per Standard Webhooks, retries on a schedule (8 attempts over about 28
+  hours by default) and records every attempt. Several relays can share a database.
+  See [docs/relay.md](docs/relay.md).

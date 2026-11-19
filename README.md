@@ -17,6 +17,7 @@ it exists if and only if the order does. See
 ## Docs
 
 - [Schema and endpoints](docs/schema.md)
+- [Relay: settings, retries, guarantees](docs/relay.md)
 
 ## Layout
 
