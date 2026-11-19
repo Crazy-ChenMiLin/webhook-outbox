@@ -3,9 +3,9 @@ name: relay
 on:
   push:
     branches: [master]
-    paths: ["relay/**", ".github/workflows/relay.yml"]
+    paths: ["relay/**", "schema/**", ".github/workflows/relay.yml"]
   pull_request:
-    paths: ["relay/**", ".github/workflows/relay.yml"]
+    paths: ["relay/**", "schema/**", ".github/workflows/relay.yml"]
 
 defaults:
   run:
@@ -13,14 +13,36 @@ defaults:
 
 jobs:
   test:
+    name: test, postgres ${{ matrix.postgres }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        postgres: ["14", "18"]
+    services:
+      postgres:
+        image: postgres:${{ matrix.postgres }}-alpine
+        env:
+          POSTGRES_USER: webhooks
+          POSTGRES_PASSWORD: webhooks
+          POSTGRES_DB: webhooks
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U webhooks"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 15
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
           go-version-file: relay/go.mod
       - run: go vet ./...
-      - run: go test -race ./...
+      # bash, not the default sh: pipefail keeps a failed test from hiding behind tee.
+      - run: go test -race -v ./... 2>&1 | tee test.log
+        shell: bash
+      # A test without a database is skipped, not failed; here none may be.
+      - run: "! grep -- '--- SKIP' test.log"
       - uses: golangci/golangci-lint-action@v9
         with:
           version: v2.14.0

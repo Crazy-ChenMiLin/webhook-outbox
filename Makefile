@@ -6,8 +6,11 @@ else
 GO = cd relay &&
 endif
 LINT_IMAGE ?= golangci/golangci-lint:v2.14.0
+PG_IMAGE ?= postgres:18-alpine
+# Tests that need PostgreSQL are skipped without it; make postgres-up starts this one.
+export WEBHOOK_OUTBOX_TEST_DATABASE_URL ?= postgres://webhooks:webhooks@127.0.0.1:55434/webhooks
 
-.PHONY: check relay-test relay-vet relay-lint relay-build relay-image
+.PHONY: check relay-test relay-vet relay-lint relay-build relay-image schema postgres-up postgres-down
 
 check: relay-vet relay-test relay-lint
 
@@ -25,3 +28,16 @@ relay-build:
 
 relay-image:
 	docker build -t webhook-outbox-relay:dev relay
+
+# schema/postgresql.sql is the migrations put together; a test fails when it is stale.
+schema:
+	{ cat relay/internal/schema/header.sql; for f in relay/internal/schema/migrations/*.sql; do printf '\n-- %s\n\n' "$$(basename $$f)"; cat "$$f"; done; } > schema/postgresql.sql
+
+postgres-up:
+	docker run -d --rm --name webhook-outbox-pg -p 55434:5432 \
+		-e POSTGRES_USER=webhooks -e POSTGRES_PASSWORD=webhooks -e POSTGRES_DB=webhooks $(PG_IMAGE)
+	# The init server listens on the socket only, so wait for TCP.
+	until docker exec webhook-outbox-pg pg_isready -h 127.0.0.1 -U webhooks -q; do sleep 0.5; done
+
+postgres-down:
+	docker rm -f webhook-outbox-pg

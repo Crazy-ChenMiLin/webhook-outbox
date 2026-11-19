@@ -1,0 +1,4 @@
+-- The tables of webhook-outbox for PostgreSQL 14 or later, generated from
+-- relay/internal/schema/migrations by make schema. Apply this file with your own
+-- migration tool, or run webhook-outbox-relay migrate, which applies the same SQL and
+-- records the version. Use one or the other, not both.
