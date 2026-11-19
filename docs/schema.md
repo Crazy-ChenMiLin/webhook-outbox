@@ -1,0 +1,38 @@
+# Schema
+
+Four tables in the application's PostgreSQL database (14 or later). Create them with
+`webhook-outbox-relay migrate`, or apply [schema/postgresql.sql](../schema/postgresql.sql)
+with your own migration tool. Use one or the other: `migrate` records what it applied in
+`webhook_schema_migrations` and does not know about SQL run by hand.
+
+| Table | One row per | Written by |
+|---|---|---|
+| `webhook_endpoints` | URL a customer wants webhooks sent to | `endpoints` commands |
+| `webhook_messages` | event, inserted in the application's transaction | the application |
+| `webhook_deliveries` | message to one endpoint | the relay |
+| `webhook_attempts` | HTTP request the relay made | the relay |
+
+- `customer` is the application's own id for whoever owns the endpoint: an account, a
+  merchant, a tenant. A message goes to the enabled endpoints of its customer that take
+  its type (`event_types` NULL means every type).
+- The secret is stored as Standard Webhooks writes it, `whsec_` and base64 of 32 random
+  bytes. The relay signs with it, so it cannot be a hash. Keep the table out of reach of
+  anyone who should not be able to sign as you.
+- `webhook_messages.payload` is the exact body that is signed and sent. The application
+  serializes it once; the relay does not parse or rewrite it.
+
+## Endpoints
+
+```
+$ webhook-outbox-relay endpoints add -customer acme -url https://acme.example/hooks -types order.paid
+id ep_2bq7v3k4...
+secret whsec_...
+$ webhook-outbox-relay endpoints list -customer acme
+$ webhook-outbox-relay endpoints secret ep_2bq7v3k4...
+$ webhook-outbox-relay endpoints disable ep_2bq7v3k4... -reason "customer asked"
+$ webhook-outbox-relay endpoints enable ep_2bq7v3k4...
+```
+
+The database is taken from `DATABASE_URL`. `list` never prints secrets; `secret` prints
+one, to hand to the customer. The URL must be absolute http or https, without
+credentials or a fragment.

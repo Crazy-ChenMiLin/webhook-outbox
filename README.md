@@ -14,6 +14,10 @@ Here the message is a row inserted in the same transaction as the order it descr
 it exists if and only if the order does. See
 [ADR 0001](docs/adr/0001-messages-are-queued-in-the-application-transaction.md).
 
+## Docs
+
+- [Schema and endpoints](docs/schema.md)
+
 ## Layout
 
 - The PHP package `ianfoxdev/webhook-outbox` is at the root: it queues messages and
