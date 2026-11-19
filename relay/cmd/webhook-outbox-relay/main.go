@@ -21,6 +21,7 @@ var version = "dev"
 const usage = `usage: webhook-outbox-relay <command>
 
   migrate    create or upgrade the webhook_ tables
+  endpoints  add, list, disable and enable customers' endpoints
   version    print the version
 
 The database is taken from DATABASE_URL (postgres://user:password@host/db).
@@ -53,6 +54,8 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout,
 			}
 			return err
 		})
+	case "endpoints":
+		return endpoints(ctx, args[1:], getenv, stdout, stderr)
 	default:
 		fmt.Fprint(stderr, usage)
 		return 2

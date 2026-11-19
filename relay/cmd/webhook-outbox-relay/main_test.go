@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/ianfoxdev/webhook-outbox/relay/internal/pgtest"
@@ -45,5 +46,50 @@ func TestMigrate(t *testing.T) {
 	}
 	if code, out, _ := cli(t, env, "migrate"); code != 0 || out != "up to date\n" {
 		t.Fatalf("exit %d, %q", code, out)
+	}
+}
+
+func TestEndpoints(t *testing.T) {
+	env := map[string]string{"DATABASE_URL": pgtest.URL(t)}
+	if code, _, errOut := cli(t, env, "migrate"); code != 0 {
+		t.Fatal(errOut)
+	}
+	code, out, errOut := cli(t, env, "endpoints", "add", "-customer", "acme", "-url", "https://acme.example/hooks", "-types", "order.paid,order.refunded")
+	if code != 0 {
+		t.Fatalf("add: exit %d, %s", code, errOut)
+	}
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	if len(lines) != 2 || !strings.HasPrefix(lines[0], "id ep_") || !strings.HasPrefix(lines[1], "secret whsec_") {
+		t.Fatalf("add printed %q", out)
+	}
+	id, secret := strings.TrimPrefix(lines[0], "id "), strings.TrimPrefix(lines[1], "secret ")
+
+	if code, out, _ := cli(t, env, "endpoints", "secret", id); code != 0 || out != secret+"\n" {
+		t.Fatalf("secret: exit %d, %q", code, out)
+	}
+	if code, _, _ := cli(t, env, "endpoints", "disable", id, "-reason", "customer asked"); code != 0 {
+		t.Fatal("disable failed")
+	}
+	code, out, _ = cli(t, env, "endpoints", "list", "-customer", "acme")
+	if code != 0 || !strings.Contains(out, id) || !strings.Contains(out, "order.paid,order.refunded") ||
+		!strings.Contains(out, "disabled: customer asked") || strings.Contains(out, secret) {
+		t.Fatalf("list: exit %d\n%s", code, out)
+	}
+	if code, _, _ := cli(t, env, "endpoints", "enable", id); code != 0 {
+		t.Fatal("enable failed")
+	}
+	if _, out, _ := cli(t, env, "endpoints", "list"); !strings.Contains(out, "enabled") {
+		t.Fatalf("list after enable:\n%s", out)
+	}
+	if code, _, errOut := cli(t, env, "endpoints", "enable", "ep_missing"); code != 1 || !strings.Contains(errOut, "endpoint not found") {
+		t.Fatalf("missing: exit %d, %q", code, errOut)
+	}
+	if code, _, errOut := cli(t, env, "endpoints", "add", "-customer", "acme", "-url", "ftp://x"); code != 1 || errOut == "" {
+		t.Fatalf("bad url: exit %d", code)
+	}
+	for _, args := range [][]string{{"endpoints"}, {"endpoints", "nope"}, {"endpoints", "secret"}, {"endpoints", "add", "extra"}} {
+		if code, _, _ := cli(t, env, args...); code != 2 {
+			t.Errorf("%v: exit %d", args, code)
+		}
 	}
 }
