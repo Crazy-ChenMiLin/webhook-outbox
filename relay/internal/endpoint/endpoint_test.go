@@ -109,11 +109,20 @@ func TestDisableEnable(t *testing.T) {
 	if again.DisabledAt == nil || !again.DisabledAt.Equal(*first.DisabledAt) || again.DisabledReason != "first" {
 		t.Fatalf("%+v", again)
 	}
+	// An endpoint the relay disabled for a failure streak starts a new one when it is
+	// enabled, or the next failure would disable it again at once.
+	if _, err := conn.Exec(ctx, `UPDATE webhook_endpoints SET failing_since = now() - interval '6 days' WHERE id = $1`, e.ID); err != nil {
+		t.Fatal(err)
+	}
 	if err := endpoint.Enable(ctx, conn, e.ID); err != nil {
 		t.Fatal(err)
 	}
 	if got, _ := endpoint.Get(ctx, conn, e.ID); got.DisabledAt != nil || got.DisabledReason != "" {
 		t.Fatalf("%+v", got)
+	}
+	var failing bool
+	if err := conn.QueryRow(ctx, `SELECT failing_since IS NOT NULL FROM webhook_endpoints WHERE id = $1`, e.ID).Scan(&failing); err != nil || failing {
+		t.Fatalf("failing_since kept after enable: %v", err)
 	}
 	for _, err := range []error{
 		endpoint.Disable(ctx, conn, "ep_missing", ""),

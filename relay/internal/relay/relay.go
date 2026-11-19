@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/ianfoxdev/webhook-outbox/relay/internal/netguard"
@@ -44,6 +45,10 @@ type Config struct {
 	Schedule []time.Duration
 	// ResponseLimit is how many bytes of a response body are kept in webhook_attempts.
 	ResponseLimit int
+	// DisableAfter disables an endpoint whose attempts have all failed for this long.
+	// A negative value never disables. An endpoint that answers 410 Gone is disabled at
+	// once either way.
+	DisableAfter time.Duration
 	// AllowPrivateNetworks lets the relay send to loopback, private and link-local
 	// addresses. Leave it off when customers register their own URLs: see netguard.
 	AllowPrivateNetworks bool
@@ -68,6 +73,9 @@ func (c Config) Defaults() Config {
 	}
 	if c.Schedule == nil {
 		c.Schedule = DefaultSchedule
+	}
+	if c.DisableAfter == 0 {
+		c.DisableAfter = 5 * 24 * time.Hour
 	}
 	if c.ResponseLimit <= 0 {
 		c.ResponseLimit = 4096
@@ -183,6 +191,7 @@ func (r *Relay) Dispatch(ctx context.Context) (int, error) {
 
 type delivery struct {
 	id       int64
+	endpoint string
 	attempts int
 	message  string
 	payload  []byte
@@ -210,7 +219,7 @@ func (r *Relay) Deliver(ctx context.Context) (int, error) {
 			FROM c WHERE d.id = c.id
 			RETURNING d.id, d.attempts, d.message_id, d.endpoint_id
 		)
-		SELECT u.id, u.attempts, m.id, m.payload, e.url, e.secret
+		SELECT u.id, u.endpoint_id, u.attempts, m.id, m.payload, e.url, e.secret
 		FROM u
 		JOIN webhook_messages m ON m.id = u.message_id
 		JOIN webhook_endpoints e ON e.id = u.endpoint_id`, r.cfg.BatchSize, lease.Microseconds())
@@ -221,7 +230,7 @@ func (r *Relay) Deliver(ctx context.Context) (int, error) {
 	for rows.Next() {
 		var d delivery
 		var payload string
-		if err := rows.Scan(&d.id, &d.attempts, &d.message, &payload, &d.url, &d.secret); err != nil {
+		if err := rows.Scan(&d.id, &d.endpoint, &d.attempts, &d.message, &payload, &d.url, &d.secret); err != nil {
 			rows.Close()
 			return 0, fmt.Errorf("claim: %w", err)
 		}
@@ -265,6 +274,9 @@ type result struct {
 
 func (r result) ok() bool { return r.status >= 200 && r.status <= 299 }
 
+// gone is the receiver asking to stop: the endpoint is disabled at once.
+func (r result) gone() bool { return r.status == http.StatusGone }
+
 func (r *Relay) send(ctx context.Context, d delivery) result {
 	res := result{started: time.Now()}
 	defer func() { res.duration = time.Since(res.started) }()
@@ -297,7 +309,10 @@ func (r *Relay) send(ctx context.Context, d delivery) result {
 }
 
 // record stores the attempt and moves the delivery on: succeeded, due again after the
-// next pause, or failed after the last attempt.
+// next pause, or failed after the last attempt. It also keeps the endpoint's health:
+// a success clears failing_since, a failure sets it, and a 410 or a failure streak
+// longer than DisableAfter disables the endpoint. Its pending deliveries then wait
+// until it is enabled again.
 func (r *Relay) record(ctx context.Context, d delivery, res result) error {
 	attempts := d.attempts + 1
 	status, pause := "pending", time.Duration(0)
@@ -332,11 +347,57 @@ func (r *Relay) record(ctx context.Context, d delivery, res result) error {
 		WHERE id = $1 AND status = 'pending'`, d.id, attempts, status, pause.Microseconds()); err != nil {
 		return fmt.Errorf("record delivery %d: %w", d.id, err)
 	}
+	disabled, err := r.health(ctx, tx, d.endpoint, res)
+	if err != nil {
+		return fmt.Errorf("record delivery %d: %w", d.id, err)
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("record delivery %d: %w", d.id, err)
 	}
+	if disabled != "" {
+		r.cfg.Logger.Warn("endpoint disabled", "endpoint", d.endpoint, "reason", disabled)
+	}
 	r.cfg.Logger.Debug("attempt", "delivery", d.id, "message", d.message, "status", res.status, "error", res.err, "result", status)
 	return nil
+}
+
+// health updates the endpoint after an attempt and returns the reason when the
+// attempt disabled it. Rows are only written when something changes, so a healthy
+// endpoint is not updated on every delivery.
+func (r *Relay) health(ctx context.Context, tx pgx.Tx, endpoint string, res result) (string, error) {
+	if res.ok() {
+		_, err := tx.Exec(ctx, `UPDATE webhook_endpoints SET failing_since = NULL
+			WHERE id = $1 AND failing_since IS NOT NULL`, endpoint)
+		return "", err
+	}
+	after := int64(-1)
+	if r.cfg.DisableAfter > 0 {
+		after = r.cfg.DisableAfter.Microseconds()
+	}
+	var reason *string
+	err := tx.QueryRow(ctx, `
+		WITH e AS (
+			SELECT id, failing_since,
+				disabled_at IS NULL AND ($2 OR ($3::bigint >= 0 AND failing_since <= now() - $3::bigint * interval '1 microsecond')) AS stop
+			FROM webhook_endpoints WHERE id = $1
+		)
+		UPDATE webhook_endpoints w SET
+			failing_since = COALESCE(e.failing_since, now()),
+			disabled_at = CASE WHEN e.stop THEN now() ELSE w.disabled_at END,
+			disabled_reason = CASE WHEN e.stop THEN
+				CASE WHEN $2 THEN 'the endpoint answered 410 Gone'
+				ELSE 'no successful attempt since ' || to_char(e.failing_since AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') END
+				ELSE w.disabled_reason END
+		FROM e
+		WHERE w.id = e.id AND (e.failing_since IS NULL OR e.stop)
+		RETURNING CASE WHEN e.stop THEN w.disabled_reason END`, endpoint, res.gone(), after).Scan(&reason)
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && reason == nil) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return *reason, nil
 }
 
 // jitter spreads a pause by up to a tenth either way, so endpoints that failed together

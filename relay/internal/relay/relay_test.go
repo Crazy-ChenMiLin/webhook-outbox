@@ -408,3 +408,111 @@ func TestPrivateAddressesAreBlockedByDefault(t *testing.T) {
 		t.Fatalf("%v", at)
 	}
 }
+
+// health reads the endpoint columns the relay keeps: the disabled reason ("" when
+// enabled) and whether failing_since is set.
+func (e *env) health(id string) (string, bool) {
+	e.t.Helper()
+	var reason *string
+	var failing bool
+	if err := e.pool.QueryRow(e.ctx, `SELECT CASE WHEN disabled_at IS NOT NULL THEN COALESCE(disabled_reason, '') END,
+		failing_since IS NOT NULL FROM webhook_endpoints WHERE id = $1`, id).Scan(&reason, &failing); err != nil {
+		e.t.Fatal(err)
+	}
+	if reason == nil {
+		return "", failing
+	}
+	return *reason, failing
+}
+
+func (e *env) failingFor(id string, d time.Duration) {
+	e.t.Helper()
+	if _, err := e.pool.Exec(e.ctx, `UPDATE webhook_endpoints SET failing_since = now() - $2 * interval '1 microsecond'
+		WHERE id = $1`, id, d.Microseconds()); err != nil {
+		e.t.Fatal(err)
+	}
+}
+
+func answering(t *testing.T, code int) string {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(code) }))
+	t.Cleanup(srv.Close)
+	return srv.URL
+}
+
+func TestGoneDisablesTheEndpoint(t *testing.T) {
+	e := setup(t)
+	ep := e.endpoint("acme", answering(t, http.StatusGone))
+	e.message("msg_1", "acme", "order.paid", `{}`)
+	e.round(relay.New(e.pool, fast))
+
+	if reason, _ := e.health(ep.ID); reason != "the endpoint answered 410 Gone" {
+		t.Fatalf("reason %q", reason)
+	}
+	// The delivery keeps its place and waits for the endpoint to be enabled.
+	if d := e.deliveries("msg_1"); d[ep.ID] != (state{"pending", 1}) {
+		t.Fatalf("%v", d)
+	}
+	e.message("msg_2", "acme", "order.paid", `{}`)
+	e.round(relay.New(e.pool, fast))
+	if d := e.deliveries("msg_2"); len(d) != 0 {
+		t.Fatalf("a disabled endpoint got a new delivery: %v", d)
+	}
+	if a := e.attempts("msg_1"); len(a) != 1 {
+		t.Fatalf("%v", a)
+	}
+}
+
+func TestFailureStreakDisablesTheEndpoint(t *testing.T) {
+	e := setup(t)
+	young := e.endpoint("young", answering(t, http.StatusInternalServerError))
+	old := e.endpoint("old", answering(t, http.StatusInternalServerError))
+	e.failingFor(young.ID, 4*24*time.Hour)
+	e.failingFor(old.ID, 6*24*time.Hour)
+	e.message("msg_young", "young", "order.paid", `{}`)
+	e.message("msg_old", "old", "order.paid", `{}`)
+	e.round(relay.New(e.pool, relay.Config{AllowPrivateNetworks: true, Schedule: []time.Duration{time.Hour}}))
+
+	if reason, failing := e.health(young.ID); reason != "" || !failing {
+		t.Fatalf("young: reason %q, failing %v", reason, failing)
+	}
+	if reason, _ := e.health(old.ID); !strings.HasPrefix(reason, "no successful attempt since ") {
+		t.Fatalf("old: reason %q", reason)
+	}
+}
+
+func TestFailureStreakStartsAndEnds(t *testing.T) {
+	e := setup(t)
+	var fail atomic.Bool
+	fail.Store(true)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if fail.Load() {
+			w.WriteHeader(http.StatusServiceUnavailable)
+		}
+	}))
+	defer srv.Close()
+	ep := e.endpoint("acme", srv.URL)
+	e.message("msg_1", "acme", "order.paid", `{}`)
+	r := relay.New(e.pool, fast)
+
+	e.round(r)
+	if reason, failing := e.health(ep.ID); reason != "" || !failing {
+		t.Fatalf("after a failure: reason %q, failing %v", reason, failing)
+	}
+	fail.Store(false)
+	e.round(r)
+	if reason, failing := e.health(ep.ID); reason != "" || failing {
+		t.Fatalf("after a success: reason %q, failing %v", reason, failing)
+	}
+}
+
+func TestNegativeDisableAfterNeverDisables(t *testing.T) {
+	e := setup(t)
+	ep := e.endpoint("acme", answering(t, http.StatusInternalServerError))
+	e.failingFor(ep.ID, 365*24*time.Hour)
+	e.message("msg_1", "acme", "order.paid", `{}`)
+	e.round(relay.New(e.pool, relay.Config{AllowPrivateNetworks: true, DisableAfter: -1, Schedule: []time.Duration{time.Hour}}))
+	if reason, _ := e.health(ep.ID); reason != "" {
+		t.Fatalf("reason %q", reason)
+	}
+}

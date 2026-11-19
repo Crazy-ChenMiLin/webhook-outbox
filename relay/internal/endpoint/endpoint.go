@@ -137,7 +137,7 @@ func Disable(ctx context.Context, conn *pgx.Conn, id, reason string) error {
 
 // Enable lets deliveries to the endpoint go out again.
 func Enable(ctx context.Context, conn *pgx.Conn, id string) error {
-	return update(ctx, conn, id, `UPDATE webhook_endpoints SET disabled_at = NULL, disabled_reason = NULL WHERE id = $1`)
+	return update(ctx, conn, id, `UPDATE webhook_endpoints SET disabled_at = NULL, disabled_reason = NULL, failing_since = NULL WHERE id = $1`)
 }
 
 func update(ctx context.Context, conn *pgx.Conn, id, sql string, args ...any) error {

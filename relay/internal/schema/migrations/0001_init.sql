@@ -11,7 +11,10 @@ CREATE TABLE webhook_endpoints (
     description     text NOT NULL DEFAULT '',
     created_at      timestamptz NOT NULL DEFAULT now(),
     disabled_at     timestamptz,
-    disabled_reason text
+    disabled_reason text,
+    -- The first failed attempt after the last successful one. The relay disables the
+    -- endpoint when this is older than its limit (5 days by default).
+    failing_since   timestamptz
 );
 CREATE INDEX webhook_endpoints_customer ON webhook_endpoints (customer);
 

@@ -29,7 +29,8 @@ The database is taken from DATABASE_URL (postgres://user:password@host/db).
 run reads RELAY_POLL_INTERVAL (1s), RELAY_BATCH_SIZE (100), RELAY_CONCURRENCY (16),
 RELAY_TIMEOUT (15s), RELAY_RESPONSE_LIMIT (4096 bytes) and RELAY_RETRY_SCHEDULE, the
 pause after each failed attempt (5s,5m,30m,2h,5h,10h,10h; "none" for one attempt).
-Requests to loopback, private and link-local addresses are refused unless
+An endpoint is disabled when it answers 410 Gone, or when no attempt has succeeded
+for RELAY_DISABLE_AFTER (5d; "never" to keep it). Requests to loopback, private and link-local addresses are refused unless
 RELAY_ALLOW_PRIVATE_NETWORKS=true.
 `
 

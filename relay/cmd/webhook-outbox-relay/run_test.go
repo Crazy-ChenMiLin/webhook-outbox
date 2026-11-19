@@ -20,13 +20,14 @@ func TestConfig(t *testing.T) {
 			"RELAY_RESPONSE_LIMIT":         "512",
 			"RELAY_RETRY_SCHEDULE":         "1s, 1m",
 			"RELAY_ALLOW_PRIVATE_NETWORKS": "true",
+			"RELAY_DISABLE_AFTER":          "3d",
 		}[k]
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if c.PollInterval != 250*time.Millisecond || c.BatchSize != 50 || c.Concurrency != 4 || c.Timeout != 5*time.Second ||
-		c.ResponseLimit != 512 || !c.AllowPrivateNetworks || !reflect.DeepEqual(c.Schedule, []time.Duration{time.Second, time.Minute}) {
+		c.ResponseLimit != 512 || !c.AllowPrivateNetworks || c.DisableAfter != 72*time.Hour || !reflect.DeepEqual(c.Schedule, []time.Duration{time.Second, time.Minute}) {
 		t.Fatalf("%+v", c)
 	}
 	none, err := config(func(k string) string {
@@ -40,6 +41,20 @@ func TestConfig(t *testing.T) {
 	}
 }
 
+func TestDisableAfter(t *testing.T) {
+	for v, want := range map[string]time.Duration{"never": -1, "36h": 36 * time.Hour, "1d": 24 * time.Hour} {
+		c, err := config(func(k string) string {
+			if k == "RELAY_DISABLE_AFTER" {
+				return v
+			}
+			return ""
+		})
+		if err != nil || c.DisableAfter != want {
+			t.Errorf("%s: %v, %v", v, c.DisableAfter, err)
+		}
+	}
+}
+
 func TestConfigRefuses(t *testing.T) {
 	for name, value := range map[string]string{
 		"RELAY_POLL_INTERVAL":          "1",
@@ -48,6 +63,7 @@ func TestConfigRefuses(t *testing.T) {
 		"RELAY_CONCURRENCY":            "many",
 		"RELAY_RETRY_SCHEDULE":         "1s,soon",
 		"RELAY_ALLOW_PRIVATE_NETWORKS": "yes",
+		"RELAY_DISABLE_AFTER":          "0d",
 	} {
 		_, err := config(func(k string) string {
 			if k == name {

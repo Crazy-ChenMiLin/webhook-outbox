@@ -44,6 +44,17 @@ func config(getenv func(string) string) (relay.Config, error) {
 	number("RELAY_BATCH_SIZE", &c.BatchSize)
 	number("RELAY_CONCURRENCY", &c.Concurrency)
 	number("RELAY_RESPONSE_LIMIT", &c.ResponseLimit)
+	if v := getenv("RELAY_DISABLE_AFTER"); v != "" && err == nil {
+		d, ok := days(v)
+		switch {
+		case v == "never":
+			c.DisableAfter = -1
+		case ok:
+			c.DisableAfter = d
+		default:
+			return c, fmt.Errorf("RELAY_DISABLE_AFTER: %q is not a number of days such as 5d, a duration such as 36h, or never", v)
+		}
+	}
 	switch v := getenv("RELAY_ALLOW_PRIVATE_NETWORKS"); v {
 	case "", "false":
 	case "true":
@@ -64,6 +75,17 @@ func config(getenv func(string) string) (relay.Config, error) {
 		}
 	}
 	return c, err
+}
+
+// days parses 5d as five days and anything else as a Go duration. It accepts only
+// positive values.
+func days(v string) (time.Duration, bool) {
+	if n, found := strings.CutSuffix(v, "d"); found {
+		d, err := strconv.Atoi(n)
+		return time.Duration(d) * 24 * time.Hour, err == nil && d > 0
+	}
+	d, err := time.ParseDuration(v)
+	return d, err == nil && d > 0
 }
 
 func runRelay(ctx context.Context, getenv func(string) string, stderr io.Writer) int {
@@ -88,7 +110,7 @@ func runRelay(ctx context.Context, getenv func(string) string, stderr io.Writer)
 	cfg = cfg.Defaults()
 	cfg.Logger.Info("relay started", "version", version, "poll_interval", cfg.PollInterval.String(),
 		"batch_size", cfg.BatchSize, "concurrency", cfg.Concurrency, "timeout", cfg.Timeout.String(), "attempts", len(cfg.Schedule)+1,
-		"allow_private_networks", cfg.AllowPrivateNetworks)
+		"disable_after", cfg.DisableAfter.String(), "allow_private_networks", cfg.AllowPrivateNetworks)
 	if err := relay.New(pool, cfg).Run(ctx); err != nil {
 		cfg.Logger.Error("relay stopped", "error", err)
 		return 1
