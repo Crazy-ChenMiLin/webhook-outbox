@@ -44,6 +44,13 @@ func config(getenv func(string) string) (relay.Config, error) {
 	number("RELAY_BATCH_SIZE", &c.BatchSize)
 	number("RELAY_CONCURRENCY", &c.Concurrency)
 	number("RELAY_RESPONSE_LIMIT", &c.ResponseLimit)
+	switch v := getenv("RELAY_ALLOW_PRIVATE_NETWORKS"); v {
+	case "", "false":
+	case "true":
+		c.AllowPrivateNetworks = true
+	default:
+		return c, fmt.Errorf("RELAY_ALLOW_PRIVATE_NETWORKS: %q is not true or false", v)
+	}
 	if v := getenv("RELAY_RETRY_SCHEDULE"); v != "" && err == nil {
 		c.Schedule = []time.Duration{}
 		if v != "none" {
@@ -80,7 +87,8 @@ func runRelay(ctx context.Context, getenv func(string) string, stderr io.Writer)
 	cfg.UserAgent = "webhook-outbox/" + version
 	cfg = cfg.Defaults()
 	cfg.Logger.Info("relay started", "version", version, "poll_interval", cfg.PollInterval.String(),
-		"batch_size", cfg.BatchSize, "concurrency", cfg.Concurrency, "timeout", cfg.Timeout.String(), "attempts", len(cfg.Schedule)+1)
+		"batch_size", cfg.BatchSize, "concurrency", cfg.Concurrency, "timeout", cfg.Timeout.String(), "attempts", len(cfg.Schedule)+1,
+		"allow_private_networks", cfg.AllowPrivateNetworks)
 	if err := relay.New(pool, cfg).Run(ctx); err != nil {
 		cfg.Logger.Error("relay stopped", "error", err)
 		return 1

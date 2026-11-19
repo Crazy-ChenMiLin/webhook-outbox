@@ -129,7 +129,7 @@ func (e *env) round(r *relay.Relay) {
 }
 
 // fast retries at once, so a test can run the schedule with a few rounds.
-var fast = relay.Config{Schedule: []time.Duration{0, 0}, Timeout: 2 * time.Second}
+var fast = relay.Config{AllowPrivateNetworks: true, Schedule: []time.Duration{0, 0}, Timeout: 2 * time.Second}
 
 func TestDeliversSignedBody(t *testing.T) {
 	e := setup(t)
@@ -217,7 +217,7 @@ func TestWaitsForTheNextAttempt(t *testing.T) {
 	defer srv.Close()
 	e.endpoint("acme", srv.URL)
 	e.message("msg_1", "acme", "order.paid", `{}`)
-	r := relay.New(e.pool, relay.Config{Schedule: []time.Duration{time.Hour}})
+	r := relay.New(e.pool, relay.Config{AllowPrivateNetworks: true, Schedule: []time.Duration{time.Hour}})
 	e.round(r)
 	e.round(r)
 	if calls.Load() != 1 {
@@ -291,7 +291,7 @@ func TestTimeoutAndRedirectAreFailures(t *testing.T) {
 	b := e.endpoint("moved", moved.URL)
 	e.message("msg_slow", "slow", "order.paid", `{}`)
 	e.message("msg_moved", "moved", "order.paid", `{}`)
-	e.round(relay.New(e.pool, relay.Config{Timeout: 200 * time.Millisecond, Schedule: []time.Duration{time.Hour}}))
+	e.round(relay.New(e.pool, relay.Config{AllowPrivateNetworks: true, Timeout: 200 * time.Millisecond, Schedule: []time.Duration{time.Hour}}))
 
 	if d := e.deliveries("msg_slow"); d[a.ID] != (state{"pending", 1}) {
 		t.Fatalf("%v", d)
@@ -316,7 +316,7 @@ func TestResponseIsCut(t *testing.T) {
 	defer srv.Close()
 	e.endpoint("acme", srv.URL)
 	e.message("msg_1", "acme", "order.paid", `{}`)
-	e.round(relay.New(e.pool, relay.Config{Schedule: []time.Duration{time.Hour}, ResponseLimit: 100}))
+	e.round(relay.New(e.pool, relay.Config{AllowPrivateNetworks: true, Schedule: []time.Duration{time.Hour}, ResponseLimit: 100}))
 	if a := e.attempts("msg_1"); len(a) != 1 || a[0] != "400 (100 bytes)" {
 		t.Fatalf("%v", a)
 	}
@@ -349,7 +349,7 @@ func TestParallelRelaysSendEachDeliveryOnce(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer pool.Close()
-		r := relay.New(pool, relay.Config{PollInterval: 10 * time.Millisecond, BatchSize: 20, Concurrency: 4})
+		r := relay.New(pool, relay.Config{AllowPrivateNetworks: true, PollInterval: 10 * time.Millisecond, BatchSize: 20, Concurrency: 4})
 		wg.Go(func() { _ = r.Run(ctx) })
 	}
 	deadline := time.Now().Add(30 * time.Second)
@@ -385,5 +385,26 @@ func TestParallelRelaysSendEachDeliveryOnce(t *testing.T) {
 	}
 	if attempts != 2*messages {
 		t.Fatalf("%d attempts recorded", attempts)
+	}
+}
+
+func TestPrivateAddressesAreBlockedByDefault(t *testing.T) {
+	e := setup(t)
+	called := false
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true }))
+	defer srv.Close()
+	ep := e.endpoint("acme", srv.URL)
+	e.message("msg_1", "acme", "order.paid", `{}`)
+
+	e.round(relay.New(e.pool, relay.Config{Schedule: []time.Duration{time.Hour}}))
+
+	if called {
+		t.Fatal("the relay reached 127.0.0.1")
+	}
+	if d := e.deliveries("msg_1"); d[ep.ID] != (state{"pending", 1}) {
+		t.Fatalf("%v", d)
+	}
+	if at := e.attempts("msg_1"); len(at) != 1 || !strings.Contains(at[0], "loopback") {
+		t.Fatalf("%v", at)
 	}
 }

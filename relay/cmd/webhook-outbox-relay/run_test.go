@@ -13,19 +13,20 @@ import (
 func TestConfig(t *testing.T) {
 	c, err := config(func(k string) string {
 		return map[string]string{
-			"RELAY_POLL_INTERVAL":  "250ms",
-			"RELAY_BATCH_SIZE":     "50",
-			"RELAY_CONCURRENCY":    "4",
-			"RELAY_TIMEOUT":        "5s",
-			"RELAY_RESPONSE_LIMIT": "512",
-			"RELAY_RETRY_SCHEDULE": "1s, 1m",
+			"RELAY_POLL_INTERVAL":          "250ms",
+			"RELAY_BATCH_SIZE":             "50",
+			"RELAY_CONCURRENCY":            "4",
+			"RELAY_TIMEOUT":                "5s",
+			"RELAY_RESPONSE_LIMIT":         "512",
+			"RELAY_RETRY_SCHEDULE":         "1s, 1m",
+			"RELAY_ALLOW_PRIVATE_NETWORKS": "true",
 		}[k]
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if c.PollInterval != 250*time.Millisecond || c.BatchSize != 50 || c.Concurrency != 4 || c.Timeout != 5*time.Second ||
-		c.ResponseLimit != 512 || !reflect.DeepEqual(c.Schedule, []time.Duration{time.Second, time.Minute}) {
+		c.ResponseLimit != 512 || !c.AllowPrivateNetworks || !reflect.DeepEqual(c.Schedule, []time.Duration{time.Second, time.Minute}) {
 		t.Fatalf("%+v", c)
 	}
 	none, err := config(func(k string) string {
@@ -41,11 +42,12 @@ func TestConfig(t *testing.T) {
 
 func TestConfigRefuses(t *testing.T) {
 	for name, value := range map[string]string{
-		"RELAY_POLL_INTERVAL":  "1",
-		"RELAY_TIMEOUT":        "-1s",
-		"RELAY_BATCH_SIZE":     "0",
-		"RELAY_CONCURRENCY":    "many",
-		"RELAY_RETRY_SCHEDULE": "1s,soon",
+		"RELAY_POLL_INTERVAL":          "1",
+		"RELAY_TIMEOUT":                "-1s",
+		"RELAY_BATCH_SIZE":             "0",
+		"RELAY_CONCURRENCY":            "many",
+		"RELAY_RETRY_SCHEDULE":         "1s,soon",
+		"RELAY_ALLOW_PRIVATE_NETWORKS": "yes",
 	} {
 		_, err := config(func(k string) string {
 			if k == name {

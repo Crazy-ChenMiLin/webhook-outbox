@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"math/rand/v2"
+	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/ianfoxdev/webhook-outbox/relay/internal/netguard"
 	"github.com/ianfoxdev/webhook-outbox/relay/internal/signing"
 )
 
@@ -42,6 +44,9 @@ type Config struct {
 	Schedule []time.Duration
 	// ResponseLimit is how many bytes of a response body are kept in webhook_attempts.
 	ResponseLimit int
+	// AllowPrivateNetworks lets the relay send to loopback, private and link-local
+	// addresses. Leave it off when customers register their own URLs: see netguard.
+	AllowPrivateNetworks bool
 	// UserAgent is sent with every request.
 	UserAgent string
 	Logger    *slog.Logger
@@ -87,11 +92,27 @@ type Relay struct {
 // New returns a relay for the database behind pool.
 func New(pool *pgxpool.Pool, cfg Config) *Relay {
 	cfg = cfg.Defaults()
+	dialer := &net.Dialer{Timeout: cfg.Timeout, KeepAlive: 30 * time.Second}
+	if !cfg.AllowPrivateNetworks {
+		dialer.Control = netguard.Control
+	}
 	return &Relay{
 		pool: pool,
 		cfg:  cfg,
 		client: &http.Client{
 			Timeout: cfg.Timeout,
+			Transport: &http.Transport{
+				// No proxy from the environment: the guard checks the address the relay
+				// connects to, and through a proxy that is the proxy.
+				Proxy:                 nil,
+				DialContext:           dialer.DialContext,
+				ForceAttemptHTTP2:     true,
+				MaxIdleConns:          100,
+				MaxIdleConnsPerHost:   4,
+				IdleConnTimeout:       90 * time.Second,
+				TLSHandshakeTimeout:   10 * time.Second,
+				ExpectContinueTimeout: time.Second,
+			},
 			// A redirect is an answer, not a success: the endpoint should be updated.
 			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 		},
