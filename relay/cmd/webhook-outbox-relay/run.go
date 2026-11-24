@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -11,6 +12,8 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/ianfoxdev/webhook-outbox/relay/internal/admin"
+	"github.com/ianfoxdev/webhook-outbox/relay/internal/metrics"
 	"github.com/ianfoxdev/webhook-outbox/relay/internal/relay"
 )
 
@@ -88,6 +91,25 @@ func days(v string) (time.Duration, bool) {
 	return d, err == nil && d > 0
 }
 
+func httpAddr(getenv func(string) string) string {
+	if v := getenv("RELAY_HTTP_ADDR"); v != "" {
+		return v
+	}
+	return ":8080"
+}
+
+// healthcheck exits 0 if the relay in this container answers /healthz. The image has
+// no shell or curl, so a Docker healthcheck runs the binary itself.
+func healthcheck(ctx context.Context, getenv func(string) string, stderr io.Writer) int {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	if err := admin.Probe(ctx, httpAddr(getenv)); err != nil {
+		fmt.Fprintln(stderr, "healthcheck:", err)
+		return 1
+	}
+	return 0
+}
+
 func runRelay(ctx context.Context, getenv func(string) string, stderr io.Writer) int {
 	cfg, err := config(getenv)
 	if err != nil {
@@ -107,11 +129,30 @@ func runRelay(ctx context.Context, getenv func(string) string, stderr io.Writer)
 	defer pool.Close()
 	cfg.Logger = slog.New(slog.NewJSONHandler(stderr, nil))
 	cfg.UserAgent = "webhook-outbox/" + version
+	m := metrics.New(pool, version, cfg.Logger)
+	cfg.Metrics = m
 	cfg = cfg.Defaults()
 	cfg.Logger.Info("relay started", "version", version, "poll_interval", cfg.PollInterval.String(),
 		"batch_size", cfg.BatchSize, "concurrency", cfg.Concurrency, "timeout", cfg.Timeout.String(), "attempts", len(cfg.Schedule)+1,
 		"disable_after", cfg.DisableAfter.String(), "allow_private_networks", cfg.AllowPrivateNetworks)
-	if err := relay.New(pool, cfg).Run(ctx); err != nil {
+	// The admin server stops the relay if it cannot start, so a busy port fails the
+	// start instead of leaving a relay nobody can see.
+	ctx, stop := context.WithCancel(ctx)
+	defer stop()
+	addr := httpAddr(getenv)
+	checks := []admin.Check{{Name: "postgres", Ping: pool.Ping}}
+	serveErr := make(chan error, 1)
+	go func() {
+		err := admin.Serve(ctx, addr, admin.Handler(m.Registry, checks))
+		if err != nil {
+			stop()
+		}
+		serveErr <- err
+	}()
+	cfg.Logger.Info("serving /metrics, /healthz and /readyz", "addr", addr)
+	runErr := relay.New(pool, cfg).Run(ctx)
+	stop()
+	if err := errors.Join(runErr, <-serveErr); err != nil {
 		cfg.Logger.Error("relay stopped", "error", err)
 		return 1
 	}

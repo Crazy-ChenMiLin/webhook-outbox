@@ -15,4 +15,7 @@ FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=build /out/webhook-outbox-relay /webhook-outbox-relay
 # Numeric, so Kubernetes can check runAsNonRoot without knowing the name.
 USER 65532:65532
+# /metrics, /healthz and /readyz.
+EXPOSE 8080
+HEALTHCHECK --interval=30s --timeout=3s CMD ["/webhook-outbox-relay", "healthcheck"]
 ENTRYPOINT ["/webhook-outbox-relay"]

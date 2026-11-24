@@ -1,0 +1,94 @@
+// Package admin serves /metrics, /healthz and /readyz.
+package admin
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"net"
+	"net/http"
+	"time"
+
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+)
+
+// Check is one dependency /readyz asks about.
+type Check struct {
+	Name string
+	Ping func(ctx context.Context) error
+}
+
+// Handler returns the admin routes.
+//
+// /healthz answers 200 while the process runs. /readyz answers 200 when every check
+// passes and 503 with the failed ones otherwise.
+func Handler(reg *prometheus.Registry, checks []Check) http.Handler {
+	mux := http.NewServeMux()
+	mux.Handle("GET /metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{Registry: reg}))
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = fmt.Fprintln(w, "ok")
+	})
+	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+		defer cancel()
+		var failed []byte
+		for _, c := range checks {
+			if err := c.Ping(ctx); err != nil {
+				failed = fmt.Appendf(failed, "%s: %v\n", c.Name, err)
+			}
+		}
+		if failed != nil {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write(failed)
+			return
+		}
+		_, _ = fmt.Fprintln(w, "ok")
+	})
+	return mux
+}
+
+// Serve listens on addr until ctx is done. It returns at once if the address is taken,
+// so a relay whose port is busy fails at start instead of running without metrics.
+func Serve(ctx context.Context, addr string, h http.Handler) error {
+	ln, err := (&net.ListenConfig{}).Listen(ctx, "tcp", addr)
+	if err != nil {
+		return fmt.Errorf("listen on %s: %w", addr, err)
+	}
+	srv := &http.Server{Handler: h, ReadHeaderTimeout: 5 * time.Second}
+	go func() {
+		<-ctx.Done()
+		shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		_ = srv.Shutdown(shutdownCtx)
+	}()
+	if err := srv.Serve(ln); !errors.Is(err, http.ErrServerClosed) {
+		return err
+	}
+	return nil
+}
+
+// Probe asks a running relay for /healthz. The image is distroless, with no shell or
+// curl, so the Docker healthcheck runs the binary: ["/webhook-outbox-relay", "healthcheck"].
+func Probe(ctx context.Context, addr string) error {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return fmt.Errorf("RELAY_HTTP_ADDR %q: %w", addr, err)
+	}
+	if host == "" || host == "0.0.0.0" || host == "::" {
+		host = "127.0.0.1"
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+net.JoinHostPort(host, port)+"/healthz", nil)
+	if err != nil {
+		return err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("/healthz answered %d", resp.StatusCode)
+	}
+	return nil
+}

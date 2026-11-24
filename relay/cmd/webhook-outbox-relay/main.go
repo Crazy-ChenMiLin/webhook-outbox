@@ -24,6 +24,8 @@ const usage = `usage: webhook-outbox-relay <command>
   migrate    create or upgrade the webhook_ tables
   endpoints  add, list, disable and enable customers' endpoints
   replay     send messages again, or catch an endpoint up after an outage
+  healthcheck
+             exit 0 if the relay on RELAY_HTTP_ADDR answers /healthz
   version    print the version
 
 The database is taken from DATABASE_URL (postgres://user:password@host/db).
@@ -33,6 +35,7 @@ pause after each failed attempt (5s,5m,30m,2h,5h,10h,10h; "none" for one attempt
 An endpoint is disabled when it answers 410 Gone, or when no attempt has succeeded
 for RELAY_DISABLE_AFTER (5d; "never" to keep it). Requests to loopback, private and
 link-local addresses are refused unless RELAY_ALLOW_PRIVATE_NETWORKS=true.
+/metrics, /healthz and /readyz are served on RELAY_HTTP_ADDR (:8080).
 `
 
 func main() {
@@ -66,6 +69,8 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout,
 		return runRelay(ctx, getenv, stderr)
 	case "endpoints":
 		return endpoints(ctx, args[1:], getenv, stdout, stderr)
+	case "healthcheck":
+		return healthcheck(ctx, getenv, stderr)
 	case "replay":
 		return replayCmd(ctx, args[1:], getenv, stdout, stderr)
 	default:

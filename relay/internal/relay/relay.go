@@ -55,7 +55,27 @@ type Config struct {
 	// UserAgent is sent with every request.
 	UserAgent string
 	Logger    *slog.Logger
+	// Metrics receives what this relay does. See package metrics.
+	Metrics Metrics
 }
+
+// Metrics receives the events of one relay process.
+type Metrics interface {
+	// Dispatched counts messages turned into deliveries.
+	Dispatched(messages int)
+	// Attempt counts a recorded attempt. result is succeeded, retrying or failed (the
+	// last attempt failed); status is the HTTP status, 0 when no response came.
+	Attempt(result string, status int, d time.Duration)
+	// EndpointDisabled counts an endpoint this relay disabled: reason is gone (410) or
+	// failing (the failure streak ran past DisableAfter).
+	EndpointDisabled(reason string)
+}
+
+type noMetrics struct{}
+
+func (noMetrics) Dispatched(int)                     {}
+func (noMetrics) Attempt(string, int, time.Duration) {}
+func (noMetrics) EndpointDisabled(string)            {}
 
 // Defaults fills the zero fields of c.
 func (c Config) Defaults() Config {
@@ -85,6 +105,9 @@ func (c Config) Defaults() Config {
 	}
 	if c.Logger == nil {
 		c.Logger = slog.New(slog.DiscardHandler)
+	}
+	if c.Metrics == nil {
+		c.Metrics = noMetrics{}
 	}
 	return c
 }
@@ -185,6 +208,9 @@ func (r *Relay) Dispatch(ctx context.Context) (int, error) {
 		UPDATE webhook_messages w SET dispatched_at = now() FROM m WHERE w.id = m.id`, r.cfg.BatchSize)
 	if err != nil {
 		return 0, fmt.Errorf("dispatch: %w", err)
+	}
+	if n := int(tag.RowsAffected()); n > 0 {
+		r.cfg.Metrics.Dispatched(n)
 	}
 	return int(tag.RowsAffected()), nil
 }
@@ -354,8 +380,15 @@ func (r *Relay) record(ctx context.Context, d delivery, res result) error {
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("record delivery %d: %w", d.id, err)
 	}
+	result := map[string]string{"succeeded": "succeeded", "pending": "retrying", "failed": "failed"}[status]
+	r.cfg.Metrics.Attempt(result, res.status, res.duration)
 	if disabled != "" {
 		r.cfg.Logger.Warn("endpoint disabled", "endpoint", d.endpoint, "reason", disabled)
+		if res.gone() {
+			r.cfg.Metrics.EndpointDisabled("gone")
+		} else {
+			r.cfg.Metrics.EndpointDisabled("failing")
+		}
 	}
 	r.cfg.Logger.Debug("attempt", "delivery", d.id, "message", d.message, "status", res.status, "error", res.err, "result", status)
 	return nil
