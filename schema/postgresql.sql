@@ -38,6 +38,8 @@ CREATE TABLE webhook_messages (
     dispatched_at timestamptz
 );
 CREATE INDEX webhook_messages_undispatched ON webhook_messages (created_at) WHERE dispatched_at IS NULL;
+-- For replay -since: one customer's messages from a point in time.
+CREATE INDEX webhook_messages_customer ON webhook_messages (customer, created_at);
 
 -- Deliveries: one message to one endpoint.
 CREATE TABLE webhook_deliveries (
