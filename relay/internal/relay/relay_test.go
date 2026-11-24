@@ -299,6 +299,11 @@ func TestTimeoutAndRedirectAreFailures(t *testing.T) {
 	if at := e.attempts("msg_slow"); len(at) != 1 || !strings.HasPrefix(at[0], "none: ") || !strings.Contains(at[0], "Timeout") {
 		t.Fatalf("%v", at)
 	}
+	var ms int
+	if err := e.pool.QueryRow(e.ctx, `SELECT a.duration_ms FROM webhook_attempts a
+		JOIN webhook_deliveries d ON d.id = a.delivery_id WHERE d.message_id = 'msg_slow'`).Scan(&ms); err != nil || ms < 200 || ms > 1000 {
+		t.Fatalf("duration_ms %d, %v", ms, err)
+	}
 	if d := e.deliveries("msg_moved"); d[b.ID] != (state{"pending", 1}) {
 		t.Fatalf("%v", d)
 	}

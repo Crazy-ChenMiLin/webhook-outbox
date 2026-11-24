@@ -277,8 +277,8 @@ func (r result) ok() bool { return r.status >= 200 && r.status <= 299 }
 // gone is the receiver asking to stop: the endpoint is disabled at once.
 func (r result) gone() bool { return r.status == http.StatusGone }
 
-func (r *Relay) send(ctx context.Context, d delivery) result {
-	res := result{started: time.Now()}
+func (r *Relay) send(ctx context.Context, d delivery) (res result) {
+	res.started = time.Now()
 	defer func() { res.duration = time.Since(res.started) }()
 	key, err := signing.Key(d.secret)
 	if err != nil {
