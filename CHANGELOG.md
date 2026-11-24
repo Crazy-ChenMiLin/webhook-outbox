@@ -21,3 +21,7 @@ schema or the configuration; such changes are marked **BREAKING**.
   failed for `RELAY_DISABLE_AFTER` (5 days by default).
 - The relay refuses to connect to loopback, private, link-local and other non-public
   addresses, checked after DNS. `RELAY_ALLOW_PRIVATE_NETWORKS=true` turns this off.
+- `webhook-outbox-relay replay`: send messages again, or catch an endpoint up after an
+  outage with `-endpoint ID -since TIME`.
+- `/metrics` (attempts, durations, backlog and lags), `/healthz`, `/readyz` on
+  `RELAY_HTTP_ADDR`, and `webhook-outbox-relay healthcheck` for the image.

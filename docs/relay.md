@@ -13,6 +13,11 @@
 | `RELAY_RETRY_SCHEDULE` | `5s,5m,30m,2h,5h,10h,10h` | pause after each failed attempt; `none` for one attempt |
 | `RELAY_DISABLE_AFTER` | `5d` | disable an endpoint when no attempt has succeeded for this long (`36h`, `7d`); `never` to keep it |
 | `RELAY_ALLOW_PRIVATE_NETWORKS` | `false` | `true` lets the relay send to loopback, private and link-local addresses |
+| `RELAY_HTTP_ADDR` | `:8080` | where `/metrics`, `/healthz` and `/readyz` are served |
+
+`/healthz` answers 200 while the process runs; `/readyz` answers 200 when the database
+answers a ping, 503 otherwise. The image runs `webhook-outbox-relay healthcheck` as its
+Docker healthcheck. A relay whose port is taken exits with code 1 at start.
 
 Logs are JSON on stderr. SIGTERM finishes the requests in flight, records them and
 exits, so a stop takes up to `RELAY_TIMEOUT`.
@@ -104,3 +109,76 @@ example when the receivers are your own services in the same network.
 - **Endpoints added later** get only messages dispatched after they were added.
   **Disabled endpoints** get no new deliveries; their pending ones wait and go out after
   `endpoints enable`.
+
+## Replay
+
+`replay` puts deliveries back in the queue. The relay sends them in its next round,
+under the same `webhook-id`, with a fresh retry schedule. Deliveries that are pending
+already are left alone: they go out anyway, and resetting one that is in flight would
+send it twice.
+
+```
+# send two messages again to every endpoint that got them
+$ webhook-outbox-relay replay msg_01J... msg_01K...
+requeued 2, created 0
+
+# send a message to one endpoint, also one that never got it
+$ webhook-outbox-relay replay -endpoint ep_2bq7v3k4... msg_01J...
+requeued 0, created 1
+
+# an endpoint was down since Friday 9:00 and is fixed now
+$ webhook-outbox-relay endpoints enable ep_2bq7v3k4...
+$ webhook-outbox-relay replay -endpoint ep_2bq7v3k4... -since 2026-11-20T09:00:00Z
+requeued 37, created 112
+```
+
+The last form is for catching an endpoint up after an outage. For messages created
+at or after `-since` (RFC 3339, or a duration before now such as `72h`), it requeues
+the endpoint's failed deliveries and creates deliveries for the messages it missed
+while it was disabled. Deliveries that succeeded are not sent again. The endpoint's
+customer and event types are respected in every form: replay does not send a message
+to an endpoint that would not have got it. Messages the relay has not dispatched yet
+are skipped; dispatch handles them.
+
+A replay to a disabled endpoint is allowed and prints a note: the deliveries wait
+until `endpoints enable`.
+
+## Metrics
+
+Counters and the histogram count what one relay process did; sum them over replicas.
+The backlog gauges are read from the database on every scrape and are the same on
+every replica; take `max`.
+
+| Metric | Type | Meaning |
+|---|---|---|
+| `webhook_outbox_attempts_total{result, code}` | counter | attempts by `result` (`succeeded`, `retrying`, `failed` for the last one) and status class (`2xx`..`5xx`, `none` for no response) |
+| `webhook_outbox_attempt_duration_seconds` | histogram | from connecting to reading the response |
+| `webhook_outbox_dispatched_messages_total` | counter | messages turned into deliveries |
+| `webhook_outbox_endpoints_disabled_total{reason}` | counter | `gone` (410) or `failing` (streak past `RELAY_DISABLE_AFTER`) |
+| `webhook_outbox_pending_deliveries{state}` | gauge | `due` (should go out now), `waiting` (for a retry, or in flight), `endpoint_disabled` |
+| `webhook_outbox_delivery_lag_seconds` | gauge | how long the most overdue delivery to an enabled endpoint has been due |
+| `webhook_outbox_undispatched_messages` | gauge | messages not turned into deliveries yet |
+| `webhook_outbox_dispatch_lag_seconds` | gauge | age of the oldest undispatched message |
+| `webhook_outbox_disabled_endpoints` | gauge | endpoints that are disabled |
+| `webhook_outbox_backlog_up` | gauge | 1 if the backlog query worked |
+| `webhook_outbox_relay_info{version}` | gauge | 1 |
+
+Both lags stay near zero while the relays keep up, whatever the customers' servers
+do: a delivery waiting for its next retry is not due, so a slow or dead endpoint does
+not move them. They grow when there are too few relays, or none.
+
+```yaml
+- alert: WebhookRelayBehind
+  expr: max(webhook_outbox_delivery_lag_seconds) > 60 or max(webhook_outbox_dispatch_lag_seconds) > 60
+  for: 5m
+- alert: WebhookRelayBlind
+  expr: max(webhook_outbox_backlog_up) == 0 or absent(webhook_outbox_backlog_up)
+  for: 5m
+- alert: WebhookDeliveriesFailing
+  # Share of attempts that got no 2xx. Customers' servers fail all the time, so the
+  # threshold is a matter of taste; page on the lags, not on this.
+  expr: |
+    sum(rate(webhook_outbox_attempts_total{result!="succeeded"}[15m]))
+      / sum(rate(webhook_outbox_attempts_total[15m])) > 0.5
+  for: 30m
+```
