@@ -1,0 +1,23 @@
+name: e2e
+
+on:
+  push:
+    branches: [master]
+    paths: ["src/**", "relay/**", "schema/**", "composer.json", "examples/**", ".github/workflows/e2e.yml"]
+  pull_request:
+    paths: ["src/**", "relay/**", "schema/**", "composer.json", "examples/**", ".github/workflows/e2e.yml"]
+
+jobs:
+  shop:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: examples/shop
+    steps:
+      - uses: actions/checkout@v7
+      - run: docker compose up -d --build --wait
+      - run: docker compose run --rm --build e2e
+      - if: failure()
+        run: docker compose logs
+      - if: always()
+        run: docker compose down -v
