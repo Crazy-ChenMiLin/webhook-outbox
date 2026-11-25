@@ -43,6 +43,7 @@ exits, so a stop takes up to `RELAY_TIMEOUT`.
 | 2xx | `succeeded` |
 | anything else, a timeout, a refused connection | `pending`, due again after the next pause of the schedule, with up to 10% jitter |
 | the same after the last pause | `failed` |
+| 410 Gone | `pending`, and the endpoint is disabled (see below) |
 
 A redirect is not followed: it counts as a failed attempt with its status code, and
 the endpoint's URL should be updated.
@@ -151,7 +152,7 @@ every replica; take `max`.
 
 | Metric | Type | Meaning |
 |---|---|---|
-| `webhook_outbox_attempts_total{result, code}` | counter | attempts by `result` (`succeeded`, `retrying`, `failed` for the last one) and status class (`2xx`..`5xx`, `none` for no response) |
+| `webhook_outbox_attempts_total{result, code}` | counter | attempts by `result` (`succeeded`, `retrying`, `failed` for the last one) and status class (`2xx`..`5xx`, `none` for no response); a 410 is `retrying`, because its delivery stays pending |
 | `webhook_outbox_attempt_duration_seconds` | histogram | from connecting to reading the response |
 | `webhook_outbox_dispatched_messages_total` | counter | messages turned into deliveries |
 | `webhook_outbox_endpoints_disabled_total{reason}` | counter | `gone` (410) or `failing` (streak past `RELAY_DISABLE_AFTER`) |
