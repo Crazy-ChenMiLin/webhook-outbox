@@ -6,6 +6,7 @@ on:
     paths: ["relay/**", "schema/**", ".github/workflows/relay.yml"]
   pull_request:
     paths: ["relay/**", "schema/**", ".github/workflows/relay.yml"]
+  workflow_dispatch:
 
 defaults:
   run:

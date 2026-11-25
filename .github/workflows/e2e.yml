@@ -6,6 +6,7 @@ on:
     paths: ["src/**", "relay/**", "schema/**", "composer.json", "examples/**", ".github/workflows/e2e.yml"]
   pull_request:
     paths: ["src/**", "relay/**", "schema/**", "composer.json", "examples/**", ".github/workflows/e2e.yml"]
+  workflow_dispatch:
 
 jobs:
   shop:

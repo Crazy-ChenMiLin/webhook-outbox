@@ -6,6 +6,7 @@ on:
     paths: ["src/**", "tests/**", "schema/**", "composer.json", "phpunit.xml.dist", "phpstan.neon", ".github/workflows/php.yml"]
   pull_request:
     paths: ["src/**", "tests/**", "schema/**", "composer.json", "phpunit.xml.dist", "phpstan.neon", ".github/workflows/php.yml"]
+  workflow_dispatch:
 
 jobs:
   test:
