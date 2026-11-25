@@ -4,8 +4,6 @@ Webhooks to your customers, queued in your application's database transaction an
 delivered by a separate relay. Signed per [Standard Webhooks](https://www.standardwebhooks.com/),
 retried on a schedule, with a log of every attempt. One PostgreSQL, nothing else.
 
-> Status: in development, nothing is released yet.
-
 ## The bug it removes
 
 The usual code calls the customer's URL, or pushes a job, right after the commit:

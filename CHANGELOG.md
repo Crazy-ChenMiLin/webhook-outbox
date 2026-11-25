@@ -7,6 +7,8 @@ schema or the configuration; such changes are marked **BREAKING**.
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-11-25
+
 ### Added
 
 - Tables `webhook_endpoints`, `webhook_messages`, `webhook_deliveries`,
@@ -31,3 +33,6 @@ schema or the configuration; such changes are marked **BREAKING**.
 - An example in `examples/shop`: a shop that queues webhooks in its transaction, the
   relay, and a receiver with endpoints that answer slowly, fail, hang or are gone,
   checked end to end in CI.
+
+[Unreleased]: https://github.com/IanFoxDev/webhook-outbox/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/IanFoxDev/webhook-outbox/releases/tag/v0.1.0
