@@ -25,3 +25,6 @@ schema or the configuration; such changes are marked **BREAKING**.
   outage with `-endpoint ID -since TIME`.
 - `/metrics` (attempts, durations, backlog and lags), `/healthz`, `/readyz` on
   `RELAY_HTTP_ADDR`, and `webhook-outbox-relay healthcheck` for the image.
+- PHP: `WebhookOutbox::send()` queues a webhook in the current PDO transaction, with
+  a Standard Webhooks body and a ULID message id; `Webhook::verify()` and `sign()` for
+  receivers; `Testing\InMemorySender`. See [docs/php.md](docs/php.md).

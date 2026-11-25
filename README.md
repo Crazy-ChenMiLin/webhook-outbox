@@ -14,8 +14,25 @@ Here the message is a row inserted in the same transaction as the order it descr
 it exists if and only if the order does. See
 [ADR 0001](docs/adr/0001-messages-are-queued-in-the-application-transaction.md).
 
+## In short
+
+```php
+$pdo->beginTransaction();
+$pdo->prepare('UPDATE orders SET status = ? WHERE id = ?')->execute(['paid', 'A-17']);
+$webhooks->send('acme', 'order.paid', ['order' => 'A-17', 'amount' => 5000]);
+$pdo->commit();
+```
+
+The relay, running next to your application, sends it to every endpoint customer
+`acme` registered for `order.paid`. On their side:
+
+```php
+$event = (new Webhook($secret))->verify($body, $headers);
+```
+
 ## Docs
 
+- [PHP: queue and verify](docs/php.md)
 - [Schema and endpoints](docs/schema.md)
 - [Relay: settings, retries, guarantees](docs/relay.md)
 
