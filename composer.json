@@ -25,9 +25,21 @@
         "php": "^8.3",
         "ext-json": "*"
     },
+    "require-dev": {
+        "phpstan/phpstan": "^2.1",
+        "phpunit/phpunit": "^12.5 || ^13.0"
+    },
+    "suggest": {
+        "ext-pdo_pgsql": "to queue webhooks with WebhookOutbox"
+    },
     "autoload": {
         "psr-4": {
             "IanFoxDev\\WebhookOutbox\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "IanFoxDev\\WebhookOutbox\\Tests\\": "tests/"
         }
     },
     "config": {

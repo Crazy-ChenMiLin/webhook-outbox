@@ -9,10 +9,21 @@ LINT_IMAGE ?= golangci/golangci-lint:v2.14.0
 PG_IMAGE ?= postgres:18-alpine
 # Tests that need PostgreSQL are skipped without it; make postgres-up starts this one.
 export WEBHOOK_OUTBOX_TEST_DATABASE_URL ?= postgres://webhooks:webhooks@127.0.0.1:55434/webhooks
+export WEBHOOK_OUTBOX_PG_DSN ?= pgsql:host=127.0.0.1;port=55434;dbname=webhooks;user=webhooks;password=webhooks
 
-.PHONY: check relay-test relay-vet relay-lint relay-build relay-image schema postgres-up postgres-down
+.PHONY: check php-test php-stan relay-test relay-vet relay-lint relay-build relay-image schema postgres-up postgres-down
 
-check: relay-vet relay-test relay-lint
+check: php-test php-stan relay-vet relay-test relay-lint
+
+vendor: composer.json
+	composer update --no-progress
+	touch vendor
+
+php-test: vendor
+	vendor/bin/phpunit
+
+php-stan: vendor
+	vendor/bin/phpstan analyse --no-progress
 
 relay-test:
 	$(GO) go test -race ./...
