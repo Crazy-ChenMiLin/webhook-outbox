@@ -42,6 +42,8 @@ jobs:
       # bash, not the default sh: pipefail keeps a failed test from hiding behind tee.
       - run: go test -race -v ./... 2>&1 | tee test.log
         shell: bash
+        env:
+          WEBHOOK_OUTBOX_TEST_DATABASE_URL: postgres://webhooks:webhooks@127.0.0.1:5432/webhooks
       # A test without a database is skipped, not failed; here none may be.
       - run: "! grep -- '--- SKIP' test.log"
       - uses: golangci/golangci-lint-action@v9
