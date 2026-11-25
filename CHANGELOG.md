@@ -28,3 +28,6 @@ schema or the configuration; such changes are marked **BREAKING**.
 - PHP: `WebhookOutbox::send()` queues a webhook in the current PDO transaction, with
   a Standard Webhooks body and a ULID message id; `Webhook::verify()` and `sign()` for
   receivers; `Testing\InMemorySender`. See [docs/php.md](docs/php.md).
+- An example in `examples/shop`: a shop that queues webhooks in its transaction, the
+  relay, and a receiver with endpoints that answer slowly, fail, hang or are gone,
+  checked end to end in CI.

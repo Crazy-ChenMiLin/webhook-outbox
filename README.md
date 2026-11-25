@@ -35,6 +35,7 @@ $event = (new Webhook($secret))->verify($body, $headers);
 - [PHP: queue and verify](docs/php.md)
 - [Schema and endpoints](docs/schema.md)
 - [Relay: settings, retries, guarantees](docs/relay.md)
+- [Example: a shop and a receiver that fails](examples/shop), runs with `docker compose`
 
 ## Layout
 
