@@ -1,0 +1,92 @@
+# A shop that queues order webhooks in its own transaction, the relay, and a receiver
+# whose endpoints fail in different ways. See README.md.
+services:
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: shop
+      POSTGRES_PASSWORD: shop
+      POSTGRES_DB: shop
+    volumes:
+      - ../../schema/postgresql.sql:/docker-entrypoint-initdb.d/1-webhooks.sql:ro
+      - ./shop/orders.sql:/docker-entrypoint-initdb.d/2-orders.sql:ro
+    healthcheck:
+      # The init server listens on the socket only, so a TCP check waits for the real one.
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "shop"]
+      interval: 1s
+      retries: 30
+
+  # Registers one endpoint per receiver scenario and hands the secrets to the receiver,
+  # the way a customer would copy them from the shop's settings page.
+  setup:
+    build: &php
+      context: ../..
+      dockerfile: examples/shop/php.Dockerfile
+    command: ["php", "/app/shop/setup.php"]
+    environment: &db
+      DATABASE_DSN: pgsql:host=postgres;dbname=shop;user=shop;password=shop
+    volumes: [secrets:/secrets]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  shop:
+    build: *php
+    command: ["php", "-S", "0.0.0.0:8000", "/app/shop/index.php"]
+    environment:
+      <<: *db
+      PHP_CLI_SERVER_WORKERS: 4
+    ports: ["${SHOP_PORT:-8000}:8000"]
+    healthcheck: &http
+      test: ["CMD", "php", "-r", "exit(@file_get_contents('http://127.0.0.1:8000/health') === 'ok' ? 0 : 1);"]
+      interval: 1s
+      retries: 30
+    depends_on:
+      setup:
+        condition: service_completed_successfully
+
+  receiver:
+    build: *php
+    command: ["php", "-S", "0.0.0.0:8000", "/app/receiver/index.php"]
+    environment:
+      # Requests to /timeout and /slow hold a worker each.
+      PHP_CLI_SERVER_WORKERS: 16
+    ports: ["${RECEIVER_PORT:-8001}:8000"]
+    volumes: [secrets:/secrets:ro]
+    healthcheck: *http
+    depends_on:
+      setup:
+        condition: service_completed_successfully
+
+  relay:
+    build: ../../relay
+    command: ["run"]
+    environment:
+      DATABASE_URL: postgres://shop:shop@postgres:5432/shop
+      # The receiver is on the compose network, a private address.
+      RELAY_ALLOW_PRIVATE_NETWORKS: "true"
+      # Short, so a run of the example takes seconds rather than days.
+      RELAY_POLL_INTERVAL: 200ms
+      RELAY_TIMEOUT: 2s
+      RELAY_RETRY_SCHEDULE: 1s,1s
+    ports: ["${RELAY_PORT:-8080}:8080"]
+    healthcheck:
+      test: ["CMD", "/webhook-outbox-relay", "healthcheck"]
+      interval: 1s
+      retries: 30
+    depends_on:
+      receiver:
+        condition: service_healthy
+
+  # docker compose run --rm e2e: places orders and checks what each endpoint got.
+  e2e:
+    build: *php
+    profiles: [test]
+    command: ["php", "/app/tests/e2e.php"]
+    environment: *db
+    depends_on:
+      relay:
+        condition: service_healthy
+
+volumes:
+  secrets:

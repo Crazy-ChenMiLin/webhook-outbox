@@ -1,0 +1,17 @@
+{
+    "name": "ianfoxdev/webhook-outbox-example-shop",
+    "description": "Example: a shop that queues webhooks with ianfoxdev/webhook-outbox.",
+    "type": "project",
+    "license": "MIT",
+    "require": {
+        "php": "^8.3",
+        "ext-pdo_pgsql": "*",
+        "ianfoxdev/webhook-outbox": "*"
+    },
+    "repositories": [
+        {"type": "path", "url": "/package", "options": {"symlink": false, "versions": {"ianfoxdev/webhook-outbox": "0.1.0"}}}
+    ],
+    "config": {
+        "sort-packages": true
+    }
+}
