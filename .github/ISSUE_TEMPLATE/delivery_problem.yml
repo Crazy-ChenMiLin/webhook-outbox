@@ -1,0 +1,28 @@
+name: Missing or repeated webhooks
+description: A webhook was not sent, was sent to the wrong endpoint, or came more times than expected
+labels: ["bug", "delivery"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Repeats with the same webhook-id after a relay restart are expected (at least once), and there is no order between messages, see docs/relay.md.
+        Endpoints added after a message was dispatched do not get it, and neither do disabled ones.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: Message ids, the rows in webhook_deliveries and webhook_attempts, and what the receiver got.
+    validations:
+      required: true
+  - type: textarea
+    id: around
+    attributes:
+      label: What was going on at the time
+      description: Relay restarts, deploys, database incidents, endpoints disabled or enabled. Relay logs around that time.
+    validations:
+      required: true
+  - type: textarea
+    id: setup
+    attributes:
+      label: Setup
+      description: Replicas, RELAY_* settings (without passwords), PostgreSQL version.
