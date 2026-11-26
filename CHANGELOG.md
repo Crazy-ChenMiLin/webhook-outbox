@@ -7,6 +7,11 @@ schema or the configuration; such changes are marked **BREAKING**.
 
 ## [Unreleased]
 
+### Fixed
+
+- Honor `Retry-After` on webhook responses with status 429 or 503, up to the
+  longest configured retry pause, and record the value on the attempt.
+
 ## [0.1.0] - 2026-11-25
 
 ### Added
